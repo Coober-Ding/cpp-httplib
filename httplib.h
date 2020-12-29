@@ -628,6 +628,9 @@ public:
   void set_file_request_handler(Handler handler);
 
   void set_error_handler(Handler handler);
+  void set_pre_routing_handler(Handler handler);
+  void set_post_routing_handler(Handler handler);
+
   void set_expect_100_continue_handler(Expect100ContinueHandler handler);
   void set_logger(Logger logger);
 
@@ -735,6 +738,8 @@ private:
   HandlersForContentReader delete_handlers_for_content_reader_;
   Handlers options_handlers_;
   Handler error_handler_;
+  Handler pre_routing_handler_;
+  Handler post_routing_handler_;
   Logger logger_;
   Expect100ContinueHandler expect_100_continue_handler_;
 
@@ -4130,10 +4135,12 @@ inline void Server::set_error_handler(Handler handler) {
   error_handler_ = std::move(handler);
 }
 
-inline void Server::set_tcp_nodelay(bool on) { tcp_nodelay_ = on; }
+inline void Server::set_pre_routing_handler(Handler handler) {
+  pre_routing_handler_ = std::move(handler);
+}
 
-inline void Server::set_socket_options(SocketOptions socket_options) {
-  socket_options_ = std::move(socket_options);
+inline void Server::set_post_routing_handler(Handler handler) {
+  post_routing_handler_ = std::move(handler);
 }
 
 inline void Server::set_logger(Logger logger) { logger_ = std::move(logger); }
@@ -4141,6 +4148,12 @@ inline void Server::set_logger(Logger logger) { logger_ = std::move(logger); }
 inline void
 Server::set_expect_100_continue_handler(Expect100ContinueHandler handler) {
   expect_100_continue_handler_ = std::move(handler);
+}
+
+inline void Server::set_tcp_nodelay(bool on) { tcp_nodelay_ = on; }
+
+inline void Server::set_socket_options(SocketOptions socket_options) {
+  socket_options_ = std::move(socket_options);
 }
 
 inline void Server::set_keep_alive_max_count(size_t count) {
@@ -4240,7 +4253,7 @@ inline bool Server::write_response_core(Stream &strm, bool close_connection,
   std::string boundary;
   if (need_apply_ranges) { apply_ranges(req, res, content_type, boundary); }
 
-  // Preapre additional headers
+  // Prepare additional headers
   if (close_connection || req.get_header_value("Connection") == "close") {
     res.set_header("Connection", "close");
   } else {
@@ -4264,7 +4277,8 @@ inline bool Server::write_response_core(Stream &strm, bool close_connection,
     res.set_header("Accept-Ranges", "bytes");
   }
 
-  detail::BufferStream bstrm;
+  // TODO: Post-routing handler support?
+  if (post_routing_handler_) { post_routing_handler_(req, res); }
 
   // Response line and headers
   {
@@ -4570,6 +4584,9 @@ inline bool Server::listen_internal() {
 }
 
 inline bool Server::routing(Request &req, Response &res, Stream &strm) {
+  // TODO: Pre-routing handler support?
+  if (pre_routing_handler_) { pre_routing_handler_(req, res); }
+
   // File handler
   bool is_head_request = req.method == "HEAD";
   if ((req.method == "GET" || is_head_request) &&
@@ -5268,7 +5285,7 @@ inline bool ClientImpl::write_content_with_provider(Stream &strm,
 
 inline bool ClientImpl::write_request(Stream &strm, const Request &req,
                                       bool close_connection, Error &error) {
-  // Prepare additonal headers
+  // Prepare additional headers
   Headers headers;
   if (close_connection) { headers.emplace("Connection", "close"); }
 
